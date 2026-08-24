@@ -34,6 +34,19 @@ Set `OBSERVATORY_PORT` to change the port:
 OBSERVATORY_PORT=4300 npm start
 ```
 
+## Keep it available in WSL
+
+Install the included user service once:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/codex-algorithm-observatory.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now codex-algorithm-observatory.service
+```
+
+Then open <http://127.0.0.1:4173> whenever WSL is running. The observer starts independently of a Codex chat and reconnects to agent-browser and AuraCall through their read-only local contracts.
+
 ## Privacy boundary
 
 The browser receives a strict structural projection of events. The server drops thread previews, prompt/message content, raw or summarized reasoning text, tool arguments, command output, tool results, and diff contents. It retains explicit user-assigned thread names, thread IDs, workspace paths, event names, lifecycle status, redacted command labels, filenames, exit codes, durations, plan labels, and aggregate usage counts.
