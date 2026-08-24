@@ -1,17 +1,19 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoEvents } from "./lib/catalog.mjs";
 import { classifyEvent, flattenThread, sanitizeEvent } from "./lib/events.mjs";
+import { EventHub } from "./lib/event-hub.mjs";
 import { readAgentBrowserEvents, readAuraCallStatus } from "./lib/runtime-sources.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(root, "public");
 const port = Number(process.env.OBSERVATORY_PORT || 4173);
-const clients = new Set();
-const recentEvents = [];
+const eventHub = new EventHub(500);
+const bridges = new Map();
 
 class RuntimeSources {
   constructor() {
@@ -37,7 +39,8 @@ class RuntimeSources {
       for (const event of events) {
         if (this.seen.has(event.sourceEventId)) continue;
         this.seen.add(event.sourceEventId);
-        publish(event);
+        const { sourceEventId, ...browserEvent } = event;
+        eventHub.publishRuntime(browserEvent);
       }
       if (this.seen.size > 1000) this.seen = new Set([...this.seen].slice(-500));
       this.statuses["agent-browser"] = { state: "observing", eventCount: events.length };
@@ -52,7 +55,7 @@ class RuntimeSources {
       const digest = JSON.stringify(event.params);
       if (this.digests.get("auracall") !== digest) {
         this.digests.set("auracall", digest);
-        publish(event);
+        eventHub.publishRuntime(event);
       }
       this.statuses.auracall = { state: "observing" };
     } catch (error) {
@@ -62,7 +65,8 @@ class RuntimeSources {
 }
 
 class CodexBridge {
-  constructor() {
+  constructor(publishEvent) {
+    this.publishEvent = publishEvent;
     this.process = null;
     this.buffer = "";
     this.nextId = 1;
@@ -115,8 +119,8 @@ class CodexBridge {
           this.pending.delete(message.id);
           if (message.error) pending.reject(new Error(message.error.message || "App Server request failed"));
           else pending.resolve(message.result);
-        } else if (message.method) {
-          publish(sanitizeEvent(message));
+        } else if (message.method && this.observedThreadId) {
+          this.publishEvent(sanitizeEvent(message));
         }
       } catch (error) {
         this.error = `Could not parse App Server output: ${error.message}`;
@@ -161,7 +165,7 @@ class CodexBridge {
       this.observationMode = "subscribed";
       this.error = null;
       const eventCount = this.publishThreadHistory(result.thread);
-      return { thread: summarizeThread(result.thread), eventCount, mode: this.observationMode };
+      return { eventCount, mode: this.observationMode };
     } catch (error) {
       if (!String(error.message).includes("active writer")) throw error;
       const result = await this.request("thread/read", { threadId, includeTurns: true });
@@ -169,17 +173,17 @@ class CodexBridge {
       this.error = null;
       const eventCount = this.publishThreadHistory(result.thread);
       this.pollTimer = setInterval(() => this.pollObservedThread(), 2000);
-      return { thread: summarizeThread(result.thread), eventCount, mode: this.observationMode };
+      return { eventCount, mode: this.observationMode };
     }
   }
 
   publishThreadHistory(thread) {
     let count = 0;
-    for (const event of flattenThread(thread)) {
-      const key = eventKey(event);
+    for (const [index, event] of flattenThread(thread).entries()) {
+      const key = eventKey(event, index);
       if (this.publishedKeys.has(key)) continue;
       this.publishedKeys.add(key);
-      publish(event);
+      this.publishEvent(event);
       count += 1;
     }
     return count;
@@ -196,44 +200,41 @@ class CodexBridge {
   }
 
   status() {
-    return { ready: this.ready, error: this.error, observedThreadId: this.observedThreadId, observationMode: this.observationMode };
+    return { ready: this.ready, error: this.error ? "Codex App Server unavailable" : null, observationMode: this.observationMode };
   }
 }
 
-const bridge = new CodexBridge();
 const runtimeSources = new RuntimeSources();
+const threadLister = new CodexBridge(() => {});
 runtimeSources.start();
 
-function summarizeThread(thread) {
-  return {
-    id: thread.id,
-    name: thread.name,
-    cwd: thread.cwd,
-    status: thread.status,
-    updatedAt: thread.updatedAt,
-    cliVersion: thread.cliVersion,
-    source: thread.source
-  };
+function getBridge(clientId) {
+  if (!bridges.has(clientId)) bridges.set(clientId, new CodexBridge((event) => eventHub.publishClient(clientId, event)));
+  return bridges.get(clientId);
 }
 
-function eventKey(event) {
-  const turnId = event.params?.turn?.id || event.params?.turnId || "";
-  const itemId = event.params?.item?.id || "";
+function bridgeStatus(clientId) {
+  return bridges.get(clientId)?.status() || { ready: false, error: null, observationMode: null };
+}
+
+function eventKey(event, index) {
   const itemStatus = event.params?.item?.status || "";
   const turnStatus = event.params?.turn?.status?.type || event.params?.turn?.status || "";
-  return [event.method, turnId, itemId, itemStatus, turnStatus].join(":");
+  return [index, event.method, event.params?.item?.type || "", itemStatus, turnStatus].join(":");
 }
 
-function publish(event) {
-  if (!event) return;
-  recentEvents.push(event);
-  if (recentEvents.length > 500) recentEvents.shift();
-  const data = `data: ${JSON.stringify(event)}\n\n`;
-  for (const response of clients) response.write(data);
+function clientIdFor(url) {
+  const value = url.searchParams.get("clientId") || "";
+  return /^[a-zA-Z0-9-]{8,80}$/.test(value) ? value : null;
 }
 
-async function writeLearningCandidate() {
-  const structural = recentEvents.filter((event) => ["codex", "agent-browser", "auracall"].includes(event.source || "codex"));
+function threadChoice(thread, index) {
+  const status = typeof thread.status === "string" ? thread.status.replace(/[^a-zA-Z -]/g, "").slice(0, 24) : "available";
+  return `Recent thread ${index + 1} · ${status}`;
+}
+
+async function writeLearningCandidate(clientId) {
+  const structural = eventHub.replay(clientId).filter((event) => ["codex", "agent-browser", "auracall"].includes(event.source || "codex"));
   const bySource = groupBy(structural, (event) => event.source || "codex");
   const algorithms = groupBy(structural.map((event) => ({ event, classification: classifyEvent(event) })), ({ classification }) => classification.algorithm);
   const createdAt = new Date().toISOString();
@@ -289,43 +290,55 @@ async function serveStatic(pathname, response) {
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
   try {
-    if (request.method === "GET" && url.pathname === "/api/status") return sendJson(response, 200, { ...bridge.status(), sources: runtimeSources.statuses, recentEventCount: recentEvents.length });
+    const isApi = url.pathname.startsWith("/api/");
+    const clientId = isApi ? clientIdFor(url) : null;
+    if (isApi && !clientId) return sendJson(response, 400, { error: "A valid clientId is required" });
+    if (request.method === "GET" && url.pathname === "/api/status") return sendJson(response, 200, { ...bridgeStatus(clientId), sources: runtimeSources.statuses, recentEventCount: eventHub.replay(clientId).length });
     if (request.method === "GET" && url.pathname === "/api/threads") {
-      const result = await bridge.listThreads();
-      return sendJson(response, 200, { data: (result.data || []).map(summarizeThread) });
+      const result = await threadLister.listThreads();
+      const channel = eventHub.channel(clientId);
+      channel.threadHandles.clear();
+      const data = (result.data || []).map((thread, index) => {
+        const handle = randomUUID();
+        channel.threadHandles.set(handle, thread.id);
+        return { handle, label: threadChoice(thread, index) };
+      });
+      return sendJson(response, 200, { data });
     }
     if (request.method === "POST" && url.pathname === "/api/observe") {
       const body = await jsonBody(request);
-      if (!body.threadId) return sendJson(response, 400, { error: "threadId is required" });
-      return sendJson(response, 200, await bridge.observe(body.threadId));
+      const threadId = eventHub.channel(clientId).threadHandles.get(body.threadHandle);
+      if (!threadId) return sendJson(response, 404, { error: "Select a thread from this browser session first" });
+      return sendJson(response, 200, await getBridge(clientId).observe(threadId));
     }
     if (request.method === "POST" && url.pathname === "/api/import") {
       const body = await jsonBody(request);
       const source = Array.isArray(body) ? body : body.events;
       if (!Array.isArray(source)) return sendJson(response, 400, { error: "Expected an events array" });
       const sanitized = source.map(sanitizeEvent).filter(Boolean);
-      sanitized.forEach(publish);
+      sanitized.forEach((event) => eventHub.publishClient(clientId, event));
       return sendJson(response, 200, { imported: sanitized.length });
     }
     if (request.method === "POST" && url.pathname === "/api/demo") {
-      demoEvents.map(sanitizeEvent).forEach(publish);
+      demoEvents.map(sanitizeEvent).forEach((event) => eventHub.publishClient(clientId, event));
       return sendJson(response, 200, { imported: demoEvents.length });
     }
     if (request.method === "POST" && url.pathname === "/api/learning-candidate") {
-      return sendJson(response, 201, await writeLearningCandidate());
+      return sendJson(response, 201, await writeLearningCandidate(clientId));
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
       response.write("retry: 1500\n\n");
-      for (const event of recentEvents) response.write(`data: ${JSON.stringify(event)}\n\n`);
-      clients.add(response);
-      request.on("close", () => clients.delete(response));
+      for (const event of eventHub.replay(clientId)) response.write(`data: ${JSON.stringify(event)}\n\n`);
+      const disconnect = eventHub.connect(clientId, response);
+      request.on("close", disconnect);
       return;
     }
     if (await serveStatic(url.pathname, response)) return;
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
-    sendJson(response, 500, { error: error.message });
+    console.error("Observatory request failed", error);
+    sendJson(response, 500, { error: "The local request could not be completed" });
   }
 });
 
@@ -334,10 +347,16 @@ server.listen(port, "127.0.0.1", () => {
 });
 
 function shutdown() {
-  if (bridge.pollTimer) clearInterval(bridge.pollTimer);
   if (runtimeSources.timer) clearInterval(runtimeSources.timer);
-  bridge.process?.kill("SIGTERM");
+  if (threadLister.pollTimer) clearInterval(threadLister.pollTimer);
+  threadLister.process?.kill("SIGTERM");
+  for (const bridge of bridges.values()) {
+    if (bridge.pollTimer) clearInterval(bridge.pollTimer);
+    bridge.process?.kill("SIGTERM");
+  }
+  eventHub.closeConnections();
   server.close(() => process.exit(0));
+  server.closeAllConnections?.();
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

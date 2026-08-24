@@ -8,14 +8,26 @@ test("sanitizer retains structure but strips tool payloads and output", () => {
     method: "item/completed",
     params: { item: { id: "a", type: "mcpToolCall", server: "web", tool: "run", arguments: { secret: "value" }, result: { content: "private" } } }
   });
-  assert.equal(event.params.item.tool, "web/run");
+  assert.equal(event.params.item.tool, "MCP tool");
   assert.equal(containsSensitivePayload(event), false);
   assert.equal("arguments" in event.params.item, false);
+  assert.equal("id" in event.params.item, false);
+});
+
+test("sanitizer rejects free-form method and status identifiers", () => {
+  const event = sanitizeEvent({ source: "private-source", method: "/home/private/command", params: { turn: { status: { type: "done", detail: "/mnt/private" } }, runtime: { kind: "/home/private" } } });
+  assert.equal(event.source, "imported");
+  assert.equal(event.method, "unknown");
+  assert.deepEqual(event.params.turn, { status: "done" });
+  assert.equal(JSON.stringify(event).includes("private"), false);
 });
 
 test("command completion is classified as execution feedback", () => {
-  const event = sanitizeEvent({ method: "item/completed", params: { item: { id: "c", type: "commandExecution", command: "npm test", exitCode: 0 } } });
+  const event = sanitizeEvent({ method: "item/completed", params: { turnId: "private-turn", item: { id: "c", type: "commandExecution", command: "cd /home/private && npm test", exitCode: 0 } } });
   assert.deepEqual(classifyEvent(event), { stage: "verify", algorithm: "Execution feedback", confidence: "direct" });
+  assert.equal(JSON.stringify(event).includes("/home/private"), false);
+  assert.equal("command" in event.params.item, false);
+  assert.equal("turnId" in event.params, false);
 });
 
 test("plan updates are explicitly marked as inference", () => {
@@ -25,7 +37,8 @@ test("plan updates are explicitly marked as inference", () => {
 test("historic threads flatten into lifecycle and item events", () => {
   const events = flattenThread({ turns: [{ id: "t", status: "completed", items: [{ id: "i", type: "fileChange", changes: [{ path: "a.js" }] }] }] });
   assert.deepEqual(events.map((event) => event.method), ["turn/started", "item/completed", "turn/completed"]);
-  assert.deepEqual(events[1].params.item.files, ["a.js"]);
+  assert.equal(events[1].params.item.fileCount, 1);
+  assert.equal(JSON.stringify(events).includes("a.js"), false);
 });
 
 test("agent-browser adapter keeps counts and drops identifiers and messages", () => {

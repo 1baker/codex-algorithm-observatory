@@ -5,6 +5,8 @@ const stages = [
   ["plan", "Plan"], ["reason", "Reason"], ["act", "Act"], ["change", "Change"], ["verify", "Verify"], ["feedback", "Feedback"]
 ];
 const state = { events: [], stageCounts: Object.fromEntries(stages.map(([id]) => [id, 0])), startedAt: null };
+const clientId = sessionStorage.getItem("observatoryClientId") || crypto.randomUUID();
+sessionStorage.setItem("observatoryClientId", clientId);
 const localBridgeAvailable = ["127.0.0.1", "localhost"].includes(location.hostname);
 const $ = (selector) => document.querySelector(selector);
 const flow = $("#flow");
@@ -30,8 +32,8 @@ function setCards() {
 
 function eventTitle(event, classification) {
   const item = event.params?.item;
-  if (item?.type === "commandExecution") return `${classification.algorithm}: ${item.command || "command"}`;
-  if (item?.type === "fileChange") return `${classification.algorithm}: ${(item.files || []).join(", ") || "files"}`;
+  if (item?.type === "commandExecution") return `${sourceLabel(event.source)} · ${classification.algorithm}`;
+  if (item?.type === "fileChange") return `${sourceLabel(event.source)} · ${classification.algorithm}: ${item.fileCount || 0} file${item.fileCount === 1 ? "" : "s"}`;
   if (item?.tool) return `${classification.algorithm}: ${item.tool}`;
   return `${sourceLabel(event.source)} · ${classification.algorithm}`;
 }
@@ -54,10 +56,18 @@ function addEvent(event) {
   if (!state.startedAt) state.startedAt = event.emittedAtMs || Date.now();
   const classification = classifyEvent(event);
   state.events.push({ event, classification });
-  if (state.events.length > 1000) state.events.shift();
-  const flowStage = stages.some(([id]) => id === classification.stage) ? classification.stage : classification.stage === "gate" ? "act" : null;
+  if (state.events.length > 1000) {
+    const removed = state.events.shift();
+    const removedStage = flowStageFor(removed.classification);
+    if (removedStage) state.stageCounts[removedStage] = Math.max(0, (state.stageCounts[removedStage] || 0) - 1);
+  }
+  const flowStage = flowStageFor(classification);
   if (flowStage) state.stageCounts[flowStage] = (state.stageCounts[flowStage] || 0) + 1;
   updateDashboard(event, classification, flowStage);
+}
+
+function flowStageFor(classification) {
+  return stages.some(([id]) => id === classification.stage) ? classification.stage : classification.stage === "gate" ? "act" : null;
 }
 
 function updateDashboard(event, classification, flowStage) {
@@ -103,7 +113,9 @@ function renderNotes() {
 function escapeHtml(value) { const span = document.createElement("span"); span.textContent = String(value); return span.innerHTML; }
 
 async function api(path, options) {
-  const response = await fetch(path, options);
+  const url = new URL(path, location.href);
+  url.searchParams.set("clientId", clientId);
+  const response = await fetch(url, options);
   const body = await response.json();
   if (!response.ok) throw new Error(body.error || `Request failed: ${response.status}`);
   return body;
@@ -114,9 +126,7 @@ async function loadThreads() {
     const result = await api("/api/threads");
     const select = $("#thread-select");
     select.innerHTML = `<option value="">Select a local Codex thread</option>` + result.data.map((thread) => {
-      const workspace = String(thread.cwd || "workspace").split(/[\\/]/).filter(Boolean).pop() || "workspace";
-      const label = thread.name || `${workspace} · ${thread.id.slice(0, 8)}`;
-      return `<option value="${thread.id}">${escapeHtml(label)} · ${escapeHtml(thread.status?.type || thread.status || "stored")}</option>`;
+      return `<option value="${thread.handle}">${escapeHtml(thread.label)}</option>`;
     }).join("");
     $("#status-message").textContent = `Found ${result.data.length} local thread${result.data.length === 1 ? "" : "s"}. Select one to load history and subscribe to its live events.`;
     $("#connection-label").textContent = "App Server ready";
@@ -140,15 +150,16 @@ async function loadSourceStatus() {
 
 $("#thread-select").addEventListener("change", (event) => { $("#observe-button").disabled = !event.target.value; });
 $("#observe-button").addEventListener("click", async () => {
-  const threadId = $("#thread-select").value;
-  if (!threadId) return;
+  const threadHandle = $("#thread-select").value;
+  if (!threadHandle) return;
+  const selectedLabel = $("#thread-select").selectedOptions[0]?.textContent || "selected thread";
   try {
     $("#status-message").textContent = "Joining thread and loading observable history…";
-    const result = await api("/api/observe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
+    const result = await api("/api/observe", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadHandle }) });
     const readOnly = result.mode === "readOnlyPolling";
     $("#status-message").textContent = readOnly
-      ? `Watching ${result.thread.name || result.thread.id} read-only. Loaded ${result.eventCount} structural events and polling for updates every 2 seconds because another Codex client owns the thread.`
-      : `Observing ${result.thread.name || result.thread.id}. Loaded ${result.eventCount} structural events; future App Server events stream live.`;
+      ? `Watching ${selectedLabel} read-only. Loaded ${result.eventCount} structural events and polling for updates every 2 seconds because another Codex client owns the thread.`
+      : `Observing ${selectedLabel}. Loaded ${result.eventCount} structural events; future App Server events stream live.`;
     $("#connection-label").textContent = readOnly ? "Read-only near-live" : "Observing live";
   } catch (error) { $("#status-message").textContent = `Could not observe thread: ${error.message}`; }
 });
@@ -196,7 +207,7 @@ document.querySelectorAll(".tab").forEach((button) => button.addEventListener("c
 }));
 
 if (localBridgeAvailable) {
-  const stream = new EventSource("/api/events");
+  const stream = new EventSource(`/api/events?clientId=${encodeURIComponent(clientId)}`);
   stream.onmessage = (message) => { try { addEvent(JSON.parse(message.data)); } catch {} };
   stream.onerror = () => { if ($("#connection-label").textContent === "Observing live") $("#connection-label").textContent = "Reconnecting"; };
 } else {
