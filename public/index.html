@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A teaching lens for observable Codex and agent-browser algorithms.">
+  <title>Algorithm Observatory</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="Algorithm Observatory home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span>Algorithm <strong>Observatory</strong></span>
+    </a>
+    <div class="live-pill"><span class="pulse"></span><span id="connection-label">Local teaching mode</span></div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">A teaching lens for coding agents</p>
+        <h1>See the control flow.<br><em>Learn the pattern.</em></h1>
+        <p class="lede">Follow observable plans, tools, changes, tests, retries, and state transitions without confusing them with private model internals.</p>
+      </div>
+      <div class="evidence-key" aria-label="Evidence labels">
+        <div><span class="evidence-dot direct"></span><strong>Direct</strong><small>Protocol or source</small></div>
+        <div><span class="evidence-dot inferred"></span><strong>Inferred</strong><small>Behavioral resemblance</small></div>
+        <div><span class="evidence-dot reference"></span><strong>Reference</strong><small>Teaching comparison</small></div>
+      </div>
+    </section>
+
+    <nav class="view-tabs" aria-label="Observatory views">
+      <button class="tab active" data-view="live">Live Codex</button>
+      <button class="tab" data-view="browser">agent-browser</button>
+      <button class="tab" data-view="library">Pattern library</button>
+    </nav>
+
+    <section id="live-view" class="view active">
+      <div class="control-deck">
+        <div class="control-copy">
+          <span class="section-number">01</span>
+          <div><h2>Choose a Codex thread</h2><p>App Server events are sanitized locally. Prompts, reasoning text, tool arguments, outputs, and diff contents are not sent to this page.</p></div>
+        </div>
+        <div class="controls">
+          <select id="thread-select" aria-label="Codex thread"><option value="">Load threads from local Codex</option></select>
+          <button id="observe-button" class="button primary" disabled>Observe thread</button>
+          <button id="demo-button" class="button ghost">Play teaching demo</button>
+          <label class="button ghost file-button">Import event JSON<input id="import-input" type="file" accept=".json,.jsonl,application/json" hidden></label>
+        </div>
+        <p id="status-message" class="status-message" role="status">Connecting to the local observer…</p>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="panel flow-panel">
+          <div class="panel-heading"><div><span class="kicker">Current model</span><h2>Observable control loop</h2></div><span id="event-count" class="counter">0 events</span></div>
+          <div id="flow" class="flow" aria-label="Observable control flow"></div>
+          <div id="active-explanation" class="active-explanation"><span class="evidence-badge direct">Direct</span><div><strong>Waiting for events</strong><p>Choose a thread or play the teaching demo.</p></div></div>
+        </section>
+
+        <section class="panel metrics-panel">
+          <div class="panel-heading"><div><span class="kicker">Measured</span><h2>Turn signals</h2></div></div>
+          <div class="metrics">
+            <div><span id="metric-actions">0</span><small>actions</small></div>
+            <div><span id="metric-changes">0</span><small>changes</small></div>
+            <div><span id="metric-checks">0</span><small>checks</small></div>
+            <div><span id="metric-inferences">0</span><small>inferences</small></div>
+          </div>
+          <p class="privacy-note"><strong>Privacy boundary</strong><br>The observer keeps structure and status, not private message or reasoning content.</p>
+        </section>
+
+        <section class="panel timeline-panel">
+          <div class="panel-heading"><div><span class="kicker">Sequence</span><h2>Event timeline</h2></div><button id="clear-button" class="text-button">Clear</button></div>
+          <ol id="timeline" class="timeline"><li class="empty-state">Events will appear here in causal order.</li></ol>
+        </section>
+
+        <section class="panel teaching-panel">
+          <div class="panel-heading"><div><span class="kicker">Teaching notes</span><h2>What can we conclude?</h2></div></div>
+          <div id="teaching-notes" class="teaching-notes"></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="browser-view" class="view">
+      <div class="section-intro"><span class="section-number">02</span><div><p class="eyebrow">Inspected at commit 7dcbd647</p><h2>Algorithms inside agent-browser</h2><p>These are conventional systems algorithms implemented in the Rust source—not a claim that the browser tool contains a hidden AI model.</p></div></div>
+      <div id="browser-cards" class="card-grid"></div>
+    </section>
+
+    <section id="library-view" class="view">
+      <div class="section-intro"><span class="section-number">03</span><div><p class="eyebrow">Primary research comparisons</p><h2>Common language-agent patterns</h2><p>Use these patterns to ask better questions about an observed trace. They are not proof that Codex uses the named method internally.</p></div></div>
+      <div id="library-cards" class="card-grid"></div>
+    </section>
+  </main>
+
+  <footer><span>Local-first · educational · evidence-labeled</span><a href="https://learn.chatgpt.com/docs/app-server" target="_blank" rel="noreferrer">Codex App Server contract ↗</a></footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
