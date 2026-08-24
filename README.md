@@ -15,6 +15,7 @@ Requirements: Node.js 20+ and a working `codex` command.
 ```bash
 cd /home/bak3r/projects/codex-algorithm-observatory
 npm test
+npm run build
 npm start
 ```
 

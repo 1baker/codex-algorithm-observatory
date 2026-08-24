@@ -1,1 +1,1 @@
-export { agentBrowserAlgorithms, codexAlgorithms, commonPatterns, confidenceLevels } from "/shared/catalog.mjs";
+export { agentBrowserAlgorithms, codexAlgorithms, commonPatterns, confidenceLevels, demoEvents } from "./shared/catalog.mjs";

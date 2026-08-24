@@ -1,1 +1,1 @@
-export { classifyEvent } from "/shared/events.mjs";
+export { classifyEvent } from "./shared/events.mjs";

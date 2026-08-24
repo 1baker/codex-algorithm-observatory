@@ -1,10 +1,11 @@
-import { agentBrowserAlgorithms, codexAlgorithms, commonPatterns, confidenceLevels } from "/catalog.js";
-import { classifyEvent } from "/events.js";
+import { agentBrowserAlgorithms, codexAlgorithms, commonPatterns, confidenceLevels, demoEvents } from "./catalog.js";
+import { classifyEvent } from "./events.js";
 
 const stages = [
   ["plan", "Plan"], ["reason", "Reason"], ["act", "Act"], ["change", "Change"], ["verify", "Verify"], ["feedback", "Feedback"]
 ];
 const state = { events: [], stageCounts: Object.fromEntries(stages.map(([id]) => [id, 0])), startedAt: null };
+const localBridgeAvailable = ["127.0.0.1", "localhost"].includes(location.hostname);
 const $ = (selector) => document.querySelector(selector);
 const flow = $("#flow");
 
@@ -135,7 +136,12 @@ $("#observe-button").addEventListener("click", async () => {
 });
 $("#demo-button").addEventListener("click", async () => {
   clearEvents();
-  await api("/api/demo", { method: "POST" });
+  if (localBridgeAvailable) {
+    try { await api("/api/demo", { method: "POST" }); }
+    catch { demoEvents.forEach(addEvent); }
+  } else {
+    demoEvents.forEach(addEvent);
+  }
   $("#status-message").textContent = "Teaching demo loaded. Follow the highlighted loop from plan to test feedback.";
 });
 $("#clear-button").addEventListener("click", clearEvents);
@@ -165,8 +171,16 @@ document.querySelectorAll(".tab").forEach((button) => button.addEventListener("c
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === `${button.dataset.view}-view`));
 }));
 
-const stream = new EventSource("/api/events");
-stream.onmessage = (message) => { try { addEvent(JSON.parse(message.data)); } catch {} };
-stream.onerror = () => { if ($("#connection-label").textContent === "Observing live") $("#connection-label").textContent = "Reconnecting"; };
+if (localBridgeAvailable) {
+  const stream = new EventSource("/api/events");
+  stream.onmessage = (message) => { try { addEvent(JSON.parse(message.data)); } catch {} };
+  stream.onerror = () => { if ($("#connection-label").textContent === "Observing live") $("#connection-label").textContent = "Reconnecting"; };
+} else {
+  $("#connection-label").textContent = "Teaching preview";
+  $("#thread-select").disabled = true;
+  $("#observe-button").disabled = true;
+  $("#status-message").textContent = "Browser preview mode: use Play teaching demo, agent-browser, and Pattern library. Live local threads remain available only from the workstation server.";
+}
 
-setCards(); renderFlow(); renderNotes(); loadThreads();
+setCards(); renderFlow(); renderNotes();
+if (localBridgeAvailable) loadThreads();
