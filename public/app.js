@@ -33,13 +33,19 @@ function eventTitle(event, classification) {
   if (item?.type === "commandExecution") return `${classification.algorithm}: ${item.command || "command"}`;
   if (item?.type === "fileChange") return `${classification.algorithm}: ${(item.files || []).join(", ") || "files"}`;
   if (item?.tool) return `${classification.algorithm}: ${item.tool}`;
-  return classification.algorithm;
+  return `${sourceLabel(event.source)} · ${classification.algorithm}`;
+}
+
+function sourceLabel(source) {
+  return ({ codex: "Codex", "agent-browser": "agent-browser", auracall: "AuraCall" })[source || "codex"] || "Imported";
 }
 
 function eventDetail(event) {
   const item = event.params?.item;
   if (item?.exitCode !== null && item?.exitCode !== undefined) return `exit ${item.exitCode}${item.durationMs ? ` · ${item.durationMs} ms` : ""}`;
   if (event.params?.plan) return `${event.params.plan.filter((step) => step.status === "completed").length}/${event.params.plan.length} plan steps completed`;
+  const runtime = event.params?.runtime;
+  if (runtime) return [runtime.kind, runtime.status, runtime.runner].filter(Boolean).join(" · ") || event.method;
   return event.method;
 }
 
@@ -120,6 +126,18 @@ async function loadThreads() {
   }
 }
 
+async function loadSourceStatus() {
+  try {
+    const result = await api("/api/status");
+    const states = { codex: result.ready ? "observing" : "available", ...Object.fromEntries(Object.entries(result.sources || {}).map(([key, value]) => [key, value.state])) };
+    document.querySelectorAll("[data-source-status]").forEach((node) => {
+      const status = states[node.dataset.sourceStatus] || "unavailable";
+      node.dataset.state = status;
+      node.title = status;
+    });
+  } catch {}
+}
+
 $("#thread-select").addEventListener("change", (event) => { $("#observe-button").disabled = !event.target.value; });
 $("#observe-button").addEventListener("click", async () => {
   const threadId = $("#thread-select").value;
@@ -145,6 +163,12 @@ $("#demo-button").addEventListener("click", async () => {
   $("#status-message").textContent = "Teaching demo loaded. Follow the highlighted loop from plan to test feedback.";
 });
 $("#clear-button").addEventListener("click", clearEvents);
+$("#learning-button").addEventListener("click", async () => {
+  try {
+    const result = await api("/api/learning-candidate", { method: "POST" });
+    $("#status-message").textContent = `Prepared ${result.filename} from ${result.eventCount} structural events. It remains review-required and has not been ingested into Graphiti.`;
+  } catch (error) { $("#status-message").textContent = `Could not prepare learning note: ${error.message}`; }
+});
 $("#import-input").addEventListener("change", async (event) => {
   const file = event.target.files?.[0]; if (!file) return;
   try {
@@ -179,8 +203,10 @@ if (localBridgeAvailable) {
   $("#connection-label").textContent = "Teaching preview";
   $("#thread-select").disabled = true;
   $("#observe-button").disabled = true;
+  $("#learning-button").disabled = true;
   $("#status-message").textContent = "Browser preview mode: use Play teaching demo, agent-browser, and Pattern library. Live local threads remain available only from the workstation server.";
 }
 
 setCards(); renderFlow(); renderNotes();
 if (localBridgeAvailable) loadThreads();
+if (localBridgeAvailable) { loadSourceStatus(); setInterval(loadSourceStatus, 5000); }

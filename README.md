@@ -21,6 +21,13 @@ npm start
 
 Open <http://127.0.0.1:4173>. The server starts a local Codex App Server and lists local threads. If it can resume the selected thread, it loads structural history and subscribes to future event notifications. If another Codex client already owns that thread, the Observatory falls back to read-only polling every two seconds and labels the mode as near-live. It also includes a deterministic teaching demo and JSON/JSONL event import.
 
+The live WSL view also polls two read-only local contracts every three seconds:
+
+- `agent-browser service events --json` for bounded browser lifecycle, health, and reconciliation signals
+- AuraCall `GET http://127.0.0.1:18095/status` for compact service and runner health
+
+Both adapters use allowlists. They discard URLs, profile/session/browser identifiers, messages, process details, credentials, and provider payloads before publication.
+
 Set `OBSERVATORY_PORT` to change the port:
 
 ```bash
@@ -32,6 +39,8 @@ OBSERVATORY_PORT=4300 npm start
 The browser receives a strict structural projection of events. The server drops thread previews, prompt/message content, raw or summarized reasoning text, tool arguments, command output, tool results, and diff contents. It retains explicit user-assigned thread names, thread IDs, workspace paths, event names, lifecycle status, redacted command labels, filenames, exit codes, durations, plan labels, and aggregate usage counts.
 
 This interface does not reveal private chain-of-thought, model weights, token-level search procedures, or other proprietary internals. Educational or noncommercial intent does not change what information is technically exposed or licensed. Reasoning **summary events** may exist in the protocol, but their text is intentionally removed here.
+
+Use **Prepare learning note** to create a structural aggregate under `learning-candidates/`. Candidates are marked `review-required`; raw events are never sent to Graphiti. After human review, stage the note through Codex Research's `stage_external_source` workflow so provenance, digest gates, retrieval evaluation, and readback remain authoritative.
 
 ## What the live view can teach
 

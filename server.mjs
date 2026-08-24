@@ -1,16 +1,65 @@
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { demoEvents } from "./lib/catalog.mjs";
-import { flattenThread, sanitizeEvent } from "./lib/events.mjs";
+import { classifyEvent, flattenThread, sanitizeEvent } from "./lib/events.mjs";
+import { readAgentBrowserEvents, readAuraCallStatus } from "./lib/runtime-sources.mjs";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const publicRoot = join(root, "public");
 const port = Number(process.env.OBSERVATORY_PORT || 4173);
 const clients = new Set();
 const recentEvents = [];
+
+class RuntimeSources {
+  constructor() {
+    this.timer = null;
+    this.seen = new Set();
+    this.digests = new Map();
+    this.statuses = { "agent-browser": { state: "checking" }, auracall: { state: "checking" } };
+  }
+
+  start() {
+    if (this.timer) return;
+    this.poll();
+    this.timer = setInterval(() => this.poll(), 3000);
+  }
+
+  async poll() {
+    await Promise.allSettled([this.pollAgentBrowser(), this.pollAuraCall()]);
+  }
+
+  async pollAgentBrowser() {
+    try {
+      const events = await readAgentBrowserEvents();
+      for (const event of events) {
+        if (this.seen.has(event.sourceEventId)) continue;
+        this.seen.add(event.sourceEventId);
+        publish(event);
+      }
+      if (this.seen.size > 1000) this.seen = new Set([...this.seen].slice(-500));
+      this.statuses["agent-browser"] = { state: "observing", eventCount: events.length };
+    } catch (error) {
+      this.statuses["agent-browser"] = { state: "unavailable", error: error.message.slice(0, 160) };
+    }
+  }
+
+  async pollAuraCall() {
+    try {
+      const event = await readAuraCallStatus(process.env.AURACALL_BASE_URL);
+      const digest = JSON.stringify(event.params);
+      if (this.digests.get("auracall") !== digest) {
+        this.digests.set("auracall", digest);
+        publish(event);
+      }
+      this.statuses.auracall = { state: "observing" };
+    } catch (error) {
+      this.statuses.auracall = { state: "unavailable", error: error.message.slice(0, 160) };
+    }
+  }
+}
 
 class CodexBridge {
   constructor() {
@@ -152,6 +201,8 @@ class CodexBridge {
 }
 
 const bridge = new CodexBridge();
+const runtimeSources = new RuntimeSources();
+runtimeSources.start();
 
 function summarizeThread(thread) {
   return {
@@ -179,6 +230,27 @@ function publish(event) {
   if (recentEvents.length > 500) recentEvents.shift();
   const data = `data: ${JSON.stringify(event)}\n\n`;
   for (const response of clients) response.write(data);
+}
+
+async function writeLearningCandidate() {
+  const structural = recentEvents.filter((event) => ["codex", "agent-browser", "auracall"].includes(event.source || "codex"));
+  const bySource = groupBy(structural, (event) => event.source || "codex");
+  const algorithms = groupBy(structural.map((event) => ({ event, classification: classifyEvent(event) })), ({ classification }) => classification.algorithm);
+  const createdAt = new Date().toISOString();
+  const body = `---\ntitle: WSL runtime algorithm learning candidate\nstatus: review-required\ncreated_at: ${createdAt}\nsource: algorithm-observatory\nprivacy: structural-only\n---\n\n# WSL runtime algorithm learning candidate\n\nThis candidate contains sanitized structural aggregates only. It excludes prompts, message text, reasoning text, tool arguments and results, URLs, profile identifiers, credentials, and raw command output. Review before Graphiti ingestion.\n\n## Source coverage\n\n${["codex", "agent-browser", "auracall"].map((source) => `- ${source}: ${(bySource[source] || []).length} events`).join("\n")}\n\n## Observed patterns\n\n${Object.entries(algorithms).sort((a, b) => b[1].length - a[1].length).map(([name, rows]) => `- ${name}: ${rows.length} observations; evidence=${rows[0].classification.confidence}`).join("\n") || "- No stable observations yet."}\n\n## Review gate\n\n- [ ] Counts represent a useful observation window.\n- [ ] Every statement is structural and source-labeled.\n- [ ] No volatile failure is generalized into a durable rule.\n- [ ] A human reviewer changed status to reviewed before ingestion.\n`;
+  const directory = join(root, "learning-candidates");
+  await mkdir(directory, { recursive: true });
+  const filename = `wsl-runtime-${createdAt.replace(/[:.]/g, "-")}.md`;
+  await writeFile(join(directory, filename), body, { flag: "wx" });
+  return { filename, eventCount: structural.length, status: "review-required" };
+}
+
+function groupBy(values, keyFor) {
+  return values.reduce((groups, value) => {
+    const key = keyFor(value);
+    (groups[key] ||= []).push(value);
+    return groups;
+  }, {});
 }
 
 async function jsonBody(request) {
@@ -217,7 +289,7 @@ async function serveStatic(pathname, response) {
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
   try {
-    if (request.method === "GET" && url.pathname === "/api/status") return sendJson(response, 200, { ...bridge.status(), recentEventCount: recentEvents.length });
+    if (request.method === "GET" && url.pathname === "/api/status") return sendJson(response, 200, { ...bridge.status(), sources: runtimeSources.statuses, recentEventCount: recentEvents.length });
     if (request.method === "GET" && url.pathname === "/api/threads") {
       const result = await bridge.listThreads();
       return sendJson(response, 200, { data: (result.data || []).map(summarizeThread) });
@@ -238,6 +310,9 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/demo") {
       demoEvents.map(sanitizeEvent).forEach(publish);
       return sendJson(response, 200, { imported: demoEvents.length });
+    }
+    if (request.method === "POST" && url.pathname === "/api/learning-candidate") {
+      return sendJson(response, 201, await writeLearningCandidate());
     }
     if (request.method === "GET" && url.pathname === "/api/events") {
       response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
@@ -260,6 +335,7 @@ server.listen(port, "127.0.0.1", () => {
 
 function shutdown() {
   if (bridge.pollTimer) clearInterval(bridge.pollTimer);
+  if (runtimeSources.timer) clearInterval(runtimeSources.timer);
   bridge.process?.kill("SIGTERM");
   server.close(() => process.exit(0));
 }

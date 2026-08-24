@@ -1,0 +1,8 @@
+{
+  "id": "algorithm-observatory-wsl-runtime-2026-08-24T20-20-40-936Z",
+  "title": "Reviewed WSL runtime algorithm baseline",
+  "updated_at": "2026-08-24T20:20:40.936Z",
+  "capture_scope": "curated_structural_aggregate",
+  "capture_notes": "User-authorized reviewed baseline. Sanitized allowlisted aggregates only; no prompts, messages, reasoning text, URLs, identifiers, credentials, tool payloads, or raw output.",
+  "content": "# Reviewed WSL runtime algorithm baseline\n\nAlgorithm Observatory observed a bounded WSL window using read-only local contracts. The window contained 29 agent-browser structural events and one AuraCall structural status event. No Codex thread was selected, so this baseline makes no Codex runtime claim.\n\nDirectly observed patterns:\n\n- agent-browser repeatedly applies state reconciliation to compare retained browser/tab state with current service state and record bounded change counts.\n- agent-browser emits browser lifecycle events as a separate observable control signal.\n- AuraCall exposes durable orchestration health through a read-only local status projection.\n\nLearning boundary: treat these as source-labeled runtime mechanisms, not hidden model internals. Raw runtime events, prompts, message or reasoning text, URLs, profile/session/browser identifiers, credentials, tool arguments/results, and command output are excluded. Future learning should require a bounded observation window, stable aggregate, explicit review, provenance, ingestion evaluation, and retrieval readback."
+}

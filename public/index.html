@@ -31,7 +31,7 @@
     </section>
 
     <nav class="view-tabs" aria-label="Observatory views">
-      <button class="tab active" data-view="live">Live Codex</button>
+      <button class="tab active" data-view="live">Live WSL</button>
       <button class="tab" data-view="browser">agent-browser</button>
       <button class="tab" data-view="library">Pattern library</button>
     </nav>
@@ -40,15 +40,22 @@
       <div class="control-deck">
         <div class="control-copy">
           <span class="section-number">01</span>
-          <div><h2>Choose a Codex thread</h2><p>App Server events are sanitized locally. Prompts, reasoning text, tool arguments, outputs, and diff contents are not sent to this page.</p></div>
+          <div><h2>Watch WSL runtimes</h2><p>Codex, agent-browser, and AuraCall events are sanitized locally. Prompts, reasoning text, URLs, identifiers, tool payloads, outputs, and diff contents are not sent to this page.</p></div>
         </div>
         <div class="controls">
           <select id="thread-select" aria-label="Codex thread"><option value="">Load threads from local Codex</option></select>
           <button id="observe-button" class="button primary" disabled>Observe thread</button>
           <button id="demo-button" class="button ghost">Play teaching demo</button>
           <label class="button ghost file-button">Import event JSON<input id="import-input" type="file" accept=".json,.jsonl,application/json" hidden></label>
+          <button id="learning-button" class="button ghost">Prepare learning note</button>
         </div>
         <p id="status-message" class="status-message" role="status">Connecting to the local observer…</p>
+        <div class="source-strip" aria-label="Runtime sources">
+          <span data-source-status="codex"><i></i>Codex</span>
+          <span data-source-status="agent-browser"><i></i>agent-browser</span>
+          <span data-source-status="auracall"><i></i>AuraCall</span>
+          <small>Structural signals only</small>
+        </div>
       </div>
 
       <div class="dashboard-grid">
@@ -66,7 +73,7 @@
             <div><span id="metric-checks">0</span><small>checks</small></div>
             <div><span id="metric-inferences">0</span><small>inferences</small></div>
           </div>
-          <p class="privacy-note"><strong>Privacy boundary</strong><br>The observer keeps structure and status, not private message or reasoning content.</p>
+          <p class="privacy-note"><strong>Privacy boundary</strong><br>The observer keeps source-labeled structure and status, not private content. Graphiti receives only a separately reviewed learning note.</p>
         </section>
 
         <section class="panel timeline-panel">
