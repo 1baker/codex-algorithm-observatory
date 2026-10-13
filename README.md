@@ -8,16 +8,19 @@ It deliberately separates three kinds of claims:
 - **Behavioral inference** describes what an observable sequence resembles without claiming that it reveals the model's internal implementation.
 - **Reference pattern** is a research concept used for teaching and comparison only.
 
+Start with [Run it](#run-it) for the local teaching view, [agent-browser source study](#agent-browser-source-study) for inspected algorithms, and [Research comparisons](#research-comparisons) for reference patterns.
+
 ## Run it
 
-Requirements: Node.js 20+ and a working `codex` command.
+Requirements: Node.js 20+ and a working `codex` command. Run the following from your cloned repository root, the folder containing `package.json`.
 
 ```bash
-cd /home/bak3r/projects/codex-algorithm-observatory
 npm test
 npm run build
 npm start
 ```
+
+In plain English: This checks the source, builds the teaching interface and starts a local web server. It starts a local Codex App Server; opening the live view may expose your local thread list on this computer.
 
 Open <http://127.0.0.1:4173>. The server starts a local Codex App Server and lists local threads. If it can resume the selected thread, it loads structural history and subscribes to future event notifications. If another Codex client already owns that thread, the Observatory falls back to read-only polling every two seconds and labels the mode as near-live. It also includes a deterministic teaching demo and JSON/JSONL event import.
 
