@@ -1,5 +1,25 @@
 # Algorithm Observatory
 
+**In one sentence:** A teaching web page that shows, step by step, what an AI coding agent is doing (planning, using tools, changing files, running tests) without showing any private content.
+
+**Who it is for:** People learning how AI coding agents work, or anyone who wants to see what an agent is doing right now.
+
+![Algorithm Observatory start page: See the control flow, learn the pattern](docs/images/overview.png)
+
+*Real screenshot of the teaching interface with no chat loaded.*
+
+**How it works:**
+
+```mermaid
+flowchart LR
+    Agent[Codex / agent-browser / AuraCall] -->|events, private text removed| Obs[Observatory]
+    Obs --> Page[Timeline in your browser]
+    Page --> You[You learn the pattern]
+```
+
+---
+
+
 Algorithm Observatory is a local teaching interface for understanding the control flow around coding agents. It visualizes observable Codex events, explains source-backed algorithms in `agent-browser`, and compares those traces with well-known language-agent patterns.
 
 It deliberately separates three kinds of claims:
